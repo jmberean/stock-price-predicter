@@ -6,17 +6,14 @@ from sklearn.preprocessing import MinMaxScaler
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score, mean_absolute_percentage_error
 import plotly.graph_objects as go
 
-
 def set_random_seed(seed=42):
     tf.random.set_seed(seed)
     np.random.seed(seed)
 
-
-def download_data(ticker, period):
+def download_data(ticker="SPY", period="1y"):
     df = yf.download(ticker, period=period)
     df.dropna(inplace=True)
     return df[['Open', 'High', 'Low', 'Close', 'Volume']]
-
 
 def scale_data(df, features, target):
     input_scaler = MinMaxScaler()
@@ -27,7 +24,6 @@ def scale_data(df, features, target):
     
     return scaled_inputs, scaled_target, input_scaler, output_scaler
 
-
 def prepare_sequences(scaled_inputs, scaled_target, look_back, forecast_horizon):
     X, Y = [], []
     for i in range(len(scaled_inputs) - look_back - forecast_horizon):
@@ -35,11 +31,9 @@ def prepare_sequences(scaled_inputs, scaled_target, look_back, forecast_horizon)
         Y.append(scaled_target[i + look_back:i + look_back + forecast_horizon].flatten())
     return np.array(X, dtype=np.float32), np.array(Y, dtype=np.float32)
 
-
-def split_data(X, Y, split_ratio):
+def split_data(X, Y, split_ratio=0.8):
     split = int(len(X) * split_ratio)
     return X[:split], X[split:], Y[:split], Y[split:]
-
 
 def build_model(input_shape, forecast_horizon):
     model = tf.keras.Sequential([
@@ -55,8 +49,7 @@ def build_model(input_shape, forecast_horizon):
     model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=0.001), loss='mse')
     return model
 
-
-def train_model(model, X_train, Y_train, X_test, Y_test, epochs, batch_size):
+def train_model(model, X_train, Y_train, X_test, Y_test, epochs=200, batch_size=64):
     early_stop = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=15, restore_best_weights=True)
     reduce_lr = tf.keras.callbacks.ReduceLROnPlateau(monitor='val_loss', factor=0.2, patience=7, min_lr=1e-5)
     
@@ -70,7 +63,6 @@ def train_model(model, X_train, Y_train, X_test, Y_test, epochs, batch_size):
     )
     return history
 
-
 def evaluate_model(Y_test, Y_pred, scaler):
     Y_test_inv = scaler.inverse_transform(Y_test)
     Y_pred_inv = scaler.inverse_transform(Y_pred)
@@ -83,7 +75,6 @@ def evaluate_model(Y_test, Y_pred, scaler):
     }
     return metrics, Y_test_inv, Y_pred_inv
 
-
 def plot_results_with_forecast(dates, actual_prices, test_pred_inv, test_dates, future_pred_inv, future_dates):
     # Ensure data is formatted properly
     dates = pd.to_datetime(dates)
@@ -94,6 +85,11 @@ def plot_results_with_forecast(dates, actual_prices, test_pred_inv, test_dates, 
     actual_prices = np.array(actual_prices).flatten()
     test_pred_inv = np.array(test_pred_inv).flatten()
     future_pred_inv = np.array(future_pred_inv).flatten()
+
+    # Ensure numeric conversion
+    actual_prices = pd.to_numeric(actual_prices)
+    test_pred_inv = pd.to_numeric(test_pred_inv)
+    future_pred_inv = pd.to_numeric(future_pred_inv)
 
     # Create the Plotly graph
     fig = go.Figure()
@@ -118,7 +114,6 @@ def plot_results_with_forecast(dates, actual_prices, test_pred_inv, test_dates, 
 
     fig.show()
 
-
 def predict_future(model, scaler, scaled_inputs, look_back, forecast_horizon, last_date):
     last_seq = np.expand_dims(scaled_inputs[-look_back:], axis=0)
     future_pred_scaled = model.predict(last_seq)
@@ -128,33 +123,23 @@ def predict_future(model, scaler, scaled_inputs, look_back, forecast_horizon, la
     results = pd.DataFrame({'Date': future_dates, 'Predicted_Close': future_pred})
     return results, future_dates
 
-
 if __name__ == "__main__":
-    # Adjustable parameters
-    ticker = "AAPL"
-    period = "5y"
-    input_features = ['Open', 'High', 'Low', 'Close', 'Volume']
-    target_feature = 'Close'
-    look_back = 60
-    forecast_horizon = 7
-    split_ratio = 0.8
-    epochs = 200
-    batch_size = 64
-
     # Set seeds for reproducibility
     set_random_seed()
 
     # Download and prepare data
-    df = download_data(ticker, period)
-    scaled_inputs, scaled_close, input_scaler, output_scaler = scale_data(df, input_features, target_feature)
+    df = download_data()
+    input_features = ['Open', 'High', 'Low', 'Close', 'Volume']
+    scaled_inputs, scaled_close, input_scaler, output_scaler = scale_data(df, input_features, 'Close')
 
-    # Prepare sequences
+    look_back = 60
+    forecast_horizon = 7
     X, Y = prepare_sequences(scaled_inputs, scaled_close, look_back, forecast_horizon)
-    X_train, X_test, Y_train, Y_test = split_data(X, Y, split_ratio)
+    X_train, X_test, Y_train, Y_test = split_data(X, Y)
 
     # Build and train the model
     model = build_model(input_shape=(look_back, len(input_features)), forecast_horizon=forecast_horizon)
-    history = train_model(model, X_train, Y_train, X_test, Y_test, epochs, batch_size)
+    history = train_model(model, X_train, Y_train, X_test, Y_test)
 
     # Evaluate the model
     Y_pred_scaled = model.predict(X_test)
@@ -185,3 +170,21 @@ if __name__ == "__main__":
         future_pred_inv=future_pred_inv, 
         future_dates=future_dates
     )
+
+
+# Model Evaluation Metrics:
+# RMSE: 11.171177384796898
+# MAE: 9.199509620666504
+# MAPE: 0.015416008420288563
+# R2: -1.0738651752471924
+# 1/1 ━━━━━━━━━━━━━━━━━━━━ 0s 25ms/step
+
+# Future Predictions:
+#         Date  Predicted_Close
+# 0 2025-01-06       589.299072
+# 1 2025-01-07       599.985962
+# 2 2025-01-08       599.384033
+# 3 2025-01-09       609.643250
+# 4 2025-01-10       605.563171
+# 5 2025-01-13       595.013611
+# 6 2025-01-14       607.814758
